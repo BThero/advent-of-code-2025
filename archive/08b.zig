@@ -7,6 +7,17 @@ var stdin_reader = std.fs.File.stdin().reader(io, &stdin_buffer);
 const stdin = &stdin_reader.interface;
 const stdout = &stdout_writer.interface;
 
+const Point = [3]i64;
+
+const UnwrapError = error{NoValue};
+fn unwrap_or_error(T: type, x: ?T) !T {
+    if (x == null) {
+        return UnwrapError.NoValue;
+    } else {
+        return x.?;
+    }
+}
+
 fn readline(delim: u8) ?[]u8 {
     const line = stdin.takeDelimiter(delim) catch {
         return null;
@@ -14,50 +25,24 @@ fn readline(delim: u8) ?[]u8 {
     return line;
 }
 
-fn read_table() ![][]u8 {
-    const allocator = std.heap.page_allocator;
-    var table_ct = try std.ArrayList([]u8).initCapacity(allocator, 0);
-
-    while (readline('\n')) |line| {
-        try table_ct.append(allocator, line);
+fn read_point() !Point {
+    var point: Point = undefined;
+    for (0..3) |i| {
+        const maybe_str = readline(if (i < 2) ',' else '\n');
+        const str = try unwrap_or_error([]u8, maybe_str);
+        const num = try std.fmt.parseInt(i64, str, 10);
+        point[i] = num;
     }
-
-    return table_ct.items;
+    return point;
 }
 
-const Point = struct {
-    x: i64,
-    y: i64,
-    z: i64,
-
-    pub fn dist_squared(self: Point, other: Point) u64 {
-        const dx = @abs(self.x - other.x);
-        const dy = @abs(self.y - other.y);
-        const dz = @abs(self.z - other.z);
-        return dx * dx + dy * dy + dz * dz;
+fn dist_squared(self: Point, other: Point) u64 {
+    var res: u64 = 0;
+    inline for (0..self.len) |i| {
+        const d = @abs(self[i] - other[i]);
+        res += d * d;
     }
-};
-
-fn read_point() ?Point {
-    const maybeX = readline(',');
-    const maybeY = readline(',');
-    const maybeZ = readline('\n');
-
-    if (maybeX == null or maybeY == null or maybeZ == null) {
-        return null;
-    }
-
-    const x = std.fmt.parseInt(i64, maybeX.?, 10) catch {
-        return null;
-    };
-    const y = std.fmt.parseInt(i64, maybeY.?, 10) catch {
-        return null;
-    };
-    const z = std.fmt.parseInt(i64, maybeZ.?, 10) catch {
-        return null;
-    };
-
-    return Point{ .x = x, .y = y, .z = z };
+    return res;
 }
 
 const Line = struct {
@@ -105,52 +90,36 @@ const DisjointSetUnion = struct {
 
         self.parent[root_a] = root_b;
         self.size[root_b] += self.size[root_a];
-
         return true;
-    }
-
-    pub fn gather_sizes(self: DisjointSetUnion, gpa: std.mem.Allocator) ![]usize {
-        const n = self.parent.len;
-        var sizes = try std.ArrayList(usize).initCapacity(gpa, n);
-        for (0..n) |i| {
-            if (self.parent[i] == i) {
-                try sizes.append(gpa, self.size[i]);
-            }
-        }
-        return sizes.items;
     }
 };
 
 pub fn main() !void {
-    const alloc = std.heap.page_allocator;
-    var points_ct = try std.ArrayList(Point).initCapacity(alloc, 0);
+    const allocator = std.heap.page_allocator;
 
+    var points_ct = try std.ArrayList(Point).initCapacity(allocator, 0);
     while (read_point()) |point| {
-        try points_ct.append(alloc, point);
-    }
-
+        try points_ct.append(allocator, point);
+    } else |_| {}
     const points = points_ct.items;
     const n = points.len;
 
-    var lines_ct = try std.ArrayList(Line).initCapacity(alloc, n * n);
-
+    var lines_ct = try std.ArrayList(Line).initCapacity(allocator, n * n);
     for (0..n) |i| {
         for (i + 1..n) |j| {
-            try lines_ct.append(alloc, Line{ .a = i, .b = j, .dist = points[i].dist_squared(points[j]) });
+            try lines_ct.append(allocator, Line{ .a = i, .b = j, .dist = dist_squared(points[i], points[j]) });
         }
     }
-
     const lines = lines_ct.items;
     std.mem.sort(Line, lines, {}, less_than);
 
-    const dsu = try DisjointSetUnion.init(alloc, n);
-
+    const dsu = try DisjointSetUnion.init(allocator, n);
     for (lines) |line| {
         const conn = dsu.try_connect(line.a, line.b);
         if (conn) {
             const p = points[line.a];
             const q = points[line.b];
-            try stdout.print("{} * {} = {}\n", .{ p.x, q.x, p.x * q.x });
+            try stdout.print("{} * {} = {}\n", .{ p[0], q[0], p[0] * q[0] });
         }
     }
 
